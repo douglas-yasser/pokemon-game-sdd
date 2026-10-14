@@ -109,12 +109,12 @@ function leerGuardado() {
 }
 
 // Por qué validación estricta con descarte total: evita resucitar posiciones
-// imposibles sujetando a medias (spec 02, decisiones). En este paso 2 solo se
-// acepta estado 'jugando' (bosque); 'victoria' se aceptará en el paso 3.
+// imposibles sujetando a medias (spec 02, decisiones). Se acepta 'jugando' y
+// 'victoria' (paso 3); cualquier otro estado es corrupción y se descarta.
 function esGuardadoValido(o) {
   if (o == null || typeof o !== 'object') return false;
   if (o.v !== 1) return false;
-  if (o.estado !== 'jugando') return false;
+  if (o.estado !== 'jugando' && o.estado !== 'victoria') return false;
   if (o.fondoActual !== 'fondo1' && o.fondoActual !== 'fondo2') return false;
   const p = o.player;
   if (p == null || typeof p !== 'object') return false;
@@ -167,13 +167,14 @@ function nuevaPartida() {
   btnEmpezar.blur(); // Por qué blur: evita re-disparos del botón con Espacio/Enter (modelo de datos).
 }
 
-// Por qué continuar restaura x/y/dir/fondo y fuerza estado='jugando':
-// este paso 2 solo restaura el bosque; 'victoria' se añadirá en el paso 3.
+// Por qué continuar restaura x/y/dir/fondo/estado tal cual: el paso 3 acepta
+// también 'victoria' (volcán + overlay) además del bosque jugable; si los pies
+// restaurados caen en PORTAL se gana al instante sin desplazar (decisión del spec).
 function continuar() {
   if (estado !== 'inicio') return;
   const g = leerGuardado();
   if (!esGuardadoValido(g)) return;
-  estado = 'jugando';
+  estado = g.estado;
   fondoActual = g.fondoActual;
   player.x = g.player.x;
   player.y = g.player.y;
@@ -183,13 +184,25 @@ function continuar() {
   player.walkT0 = ahora; // Por qué reponer a now: los relojes son transitorios y no se guardan.
   player.idleT0 = ahora;
   pressed.clear();
+  pantallaInicio.classList.add('oculta');
+  if (estado === 'victoria') {
+    // Por qué mostrar el overlay: restaura el volcán tal cual quedó al ganar
+    // (criterio 7), sin pasar por jugando ni re-guardar.
+    pantallaVictoria.classList.remove('oculta');
+  } else if (fondoActual === 'fondo1' && piesEnPortal()) {
+    // Por qué ganar al instante sin desplazar: coherente con "pies en PORTAL
+    // ganan", sin excepción de 1 px (spec 02, decisiones); ganar() ya cambia a
+    // fondo2, muestra el overlay y guarda el estado victoria.
+    ganar();
+    player.moving = false;
+    player.idleT0 = ahora;
+  }
   try {
     lastSavedJson = JSON.stringify(snapshot());
   } catch {
     lastSavedJson = null;
   }
   lastSaveTime = ahora; // Por qué: reinicia el throttle para no guardar en el mismo frame.
-  pantallaInicio.classList.add('oculta');
   btnContinuar.blur(); // Por qué blur: evita re-disparos del botón (modelo de datos).
 }
 
@@ -208,8 +221,11 @@ function ganar() {
 
 // Por qué volverAEmpezar: aplica el reset completo del spec (480,400,'down',fondo1,
 // teclas vaciadas, relojes repuestos) y vuelve a 'inicio' para repetir el ciclo inicio→juego→victoria→inicio.
+// Por qué borra el guardado y oculta Continuar: evita que la partida vieja resucite
+// tras el reset (paso 3, criterio 9) y deja el inicio limpio con foco en Empezar.
 function volverAEmpezar() {
   if (estado !== 'victoria') return;
+  borrarGuardado();
   estado = 'inicio';
   fondoActual = 'fondo1';
   player.x = 480;
@@ -221,6 +237,7 @@ function volverAEmpezar() {
   player.idleT0 = ahora;
   pressed.clear(); // Por qué: al volver se vacía (modelo de datos).
   pantallaVictoria.classList.add('oculta');
+  btnContinuar.classList.add('oculta');
   pantallaInicio.classList.remove('oculta');
   if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: deja el foco listo para el siguiente Enter.
 }
@@ -228,9 +245,9 @@ function volverAEmpezar() {
 btnEmpezar.addEventListener('click', nuevaPartida);
 btnContinuar.addEventListener('click', continuar);
 btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
-// Por qué leer y validar al arrancar: si hay guardado válido de bosque se muestra
-// Continuar con el foco; si no (ausente o inválido), queda oculta y el foco va a
-// Empezar (criterios 4 y 10). Solo 'jugando' en este paso 2; 'victoria' entra en el paso 3.
+// Por qué leer y validar al arrancar: si hay guardado válido (jugando o victoria)
+// se muestra Continuar con el foco; si no (ausente o inválido), queda oculta y el
+// foco va a Empezar (criterios 4 y 10).
 if (esGuardadoValido(leerGuardado())) {
   btnContinuar.classList.remove('oculta');
   if (document.activeElement !== btnContinuar) btnContinuar.focus();

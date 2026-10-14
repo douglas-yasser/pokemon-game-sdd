@@ -8,12 +8,12 @@ const H = 540;
 const SCALE = 2;
 const SPEED = 220;
 
-// Por qué clave versionada: una sola ranura en localStorage que sobrevive a
-// cerrar el navegador y permite invalidar el formato con `v` si cambia (spec 02, paso 1).
-const SAVE_KEY = 'pokemonGame.save.v1';
-// Por qué 1000 ms: throttle del spec para no escribir en cada frame (~60 escrituras/s
-// serían coste inútil); basta para ~100 bytes y cumple el criterio 1.
-const SAVE_EVERY_MS = 1000;
+// Por qué prefijo por ranura: tres ranuras manuales en localStorage; una ranura
+// corrupta no invalida las otras y se reutiliza la validación estricta (spec 02, paso 4).
+// La clave vieja `pokemonGame.save.v1` se ignora sin migración.
+const SAVE_SLOT_PREFIX = 'pokemonGame.save.v1.slot';
+// Por qué 3: número de ranuras fijado por el spec.
+const NUM_RANURAS = 3;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -44,41 +44,30 @@ const PORTAL = { x: 880, y: 150, w: 80, h: 240 };
 // 8 direcciones de DIRECTIONS, y los relojes marcan cuándo empezó cada animación.
 const player = { x: 480, y: 400, dir: 'down', moving: false, walkT0: 0, idleT0: 0 };
 
-// Por qué lastSavedJson/lastSaveTime: el throttle limita a 1 intento/s y la
-// comparación del string JSON completo detecta cualquier cambio (x/y/dir/
-// estado/fondo) sin comparar campo a campo (spec 02, decisiones).
-let lastSavedJson = null;
-let lastSaveTime = 0;
-
-// Por qué snapshot mínimo sin savedAt: nada lo lee; menos bytes y menos
-// validación (spec 02, decisiones). Incluye v/estado/fondo/player.
+// Por qué snapshot con savedAt: la lista del paso 5 necesita la fecha; se genera
+// aquí con Date.now() para que cada escritura manual quede fechada (spec 02, modelo).
 function snapshot() {
   return {
     v: 1,
     estado,
     fondoActual,
     player: { x: player.x, y: player.y, dir: player.dir },
+    savedAt: Date.now(),
   };
 }
 
-// Por qué escribirGuardado: centraliza el único punto de escritura (throttle,
-// ganar y pagehide lo reutilizan). Solo guarda en jugando/victoria, compara
-// el JSON para no reescribir si nada cambió y traga errores de localStorage
-// (modo privado / cuota) con try/catch para no romper el bucle.
-function escribirGuardado() {
-  if (estado !== 'jugando' && estado !== 'victoria') return;
-  let json;
+// Por qué guardarEnRanura es el único punto de escritura: si quedara cualquier
+// autoguardado, "el jugador decide cuándo guardar" sería falso (spec 02, paso 4).
+// Solo guarda en jugando/victoria y traga errores de localStorage para no romper el juego.
+function guardarEnRanura(i) {
+  if (!Number.isInteger(i) || i < 1 || i > NUM_RANURAS) return false;
+  if (estado !== 'jugando' && estado !== 'victoria') return false;
   try {
-    json = JSON.stringify(snapshot());
-  } catch {
-    return;
-  }
-  if (json === lastSavedJson) return;
-  try {
-    localStorage.setItem(SAVE_KEY, json);
-    lastSavedJson = json;
+    localStorage.setItem(SAVE_SLOT_PREFIX + i, JSON.stringify(snapshot()));
+    return true;
   } catch {
     // Por qué silencio: el juego debe seguir igual aunque no se pueda guardar.
+    return false;
   }
 }
 
@@ -95,12 +84,14 @@ const DIRS_VALIDAS = new Set([
   'downLeft',
 ]);
 
-// Por qué leerGuardado devuelve null ante cualquier fallo: clave ausente,
-// JSON roto o localStorage bloqueado (modo privado) equivalen a "sin guardado"
-// y la pantalla de inicio arranca limpia sin romper el juego (criterio 10).
-function leerGuardado() {
+// Por qué leerRanura devuelve null ante cualquier fallo: clave ausente, JSON roto,
+// índice fuera de rango o localStorage bloqueado equivalen a "ranura vacía".
+// Existe ya en el paso 4 aunque la lista llegue en el paso 5: permite verificar
+// en DevTools y reutiliza la validación por ranura.
+function leerRanura(i) {
+  if (!Number.isInteger(i) || i < 1 || i > NUM_RANURAS) return null;
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(SAVE_SLOT_PREFIX + i);
     if (raw == null) return null;
     return JSON.parse(raw);
   } catch {
@@ -110,7 +101,9 @@ function leerGuardado() {
 
 // Por qué validación estricta con descarte total: evita resucitar posiciones
 // imposibles sujetando a medias (spec 02, decisiones). Se acepta 'jugando' y
-// 'victoria' (paso 3); cualquier otro estado es corrupción y se descarta.
+// 'victoria'; cualquier otro estado es corrupción y se descarta.
+// Por qué savedAt opcional: si falta o no es número la ranura sigue válida
+// (el paso 5 mostrará "sin fecha"); nunca invalida por la fecha.
 function esGuardadoValido(o) {
   if (o == null || typeof o !== 'object') return false;
   if (o.v !== 1) return false;
@@ -124,16 +117,6 @@ function esGuardadoValido(o) {
   return true;
 }
 
-// Por qué borrarGuardado resetea lastSavedJson: tras borrar, el próximo
-// autoguardado debe escribir la partida nueva sin compararse con la vieja.
-function borrarGuardado() {
-  try {
-    localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // Por qué silencio: el juego sigue igual aunque el borrado falle.
-  }
-  lastSavedJson = null;
-}
 // Solo flechas (sin WASD, según lo acordado). Un Set permite diagonales
 // (dos teclas a la vez) e ignora la auto-repetición del keydown.
 const pressed = new Set();
@@ -144,14 +127,14 @@ const pantallaInicio = document.getElementById('pantalla-inicio');
 const pantallaVictoria = document.getElementById('pantalla-victoria');
 const btnEmpezar = document.getElementById('btn-empezar');
 const btnReiniciar = document.getElementById('btn-reiniciar');
-const btnContinuar = document.getElementById('btn-continuar');
+const hud = document.getElementById('hud');
+const btnGuardar = document.getElementById('btn-guardar');
+const msgGuardado = document.getElementById('msg-guardado');
 
-// Por qué nuevaPartida borra al pulsar y resetea al inicio del bosque:
-// evita que la partida vieja resucite tras el reset (spec 02, decisiones) y
-// cumple el criterio 8 (abajo al centro, mirando abajo, en fondo1).
+// Por qué nuevaPartida no toca ranuras: tocarlas al empezar sería un borrado
+// encubierto (spec 02, paso 4). Solo resetea al inicio del bosque y muestra el HUD.
 function nuevaPartida() {
   if (estado !== 'inicio') return;
-  borrarGuardado();
   estado = 'jugando';
   fondoActual = 'fondo1';
   player.x = 480;
@@ -162,70 +145,30 @@ function nuevaPartida() {
   player.walkT0 = ahora; // Por qué reponer: evita retomar a mitad de ciclo.
   player.idleT0 = ahora;
   pressed.clear(); // Por qué: evita que una flecha pulsada tras el overlay mueva de golpe.
-  lastSaveTime = ahora; // Por qué: el throttle arranca a contar desde la nueva partida.
   pantallaInicio.classList.add('oculta');
+  hud.classList.remove('oculta');
+  msgGuardado.textContent = '';
   btnEmpezar.blur(); // Por qué blur: evita re-disparos del botón con Espacio/Enter (modelo de datos).
-}
-
-// Por qué continuar restaura x/y/dir/fondo/estado tal cual: el paso 3 acepta
-// también 'victoria' (volcán + overlay) además del bosque jugable; si los pies
-// restaurados caen en PORTAL se gana al instante sin desplazar (decisión del spec).
-function continuar() {
-  if (estado !== 'inicio') return;
-  const g = leerGuardado();
-  if (!esGuardadoValido(g)) return;
-  estado = g.estado;
-  fondoActual = g.fondoActual;
-  player.x = g.player.x;
-  player.y = g.player.y;
-  player.dir = g.player.dir;
-  player.moving = false;
-  const ahora = performance.now();
-  player.walkT0 = ahora; // Por qué reponer a now: los relojes son transitorios y no se guardan.
-  player.idleT0 = ahora;
-  pressed.clear();
-  pantallaInicio.classList.add('oculta');
-  if (estado === 'victoria') {
-    // Por qué mostrar el overlay: restaura el volcán tal cual quedó al ganar
-    // (criterio 7), sin pasar por jugando ni re-guardar.
-    pantallaVictoria.classList.remove('oculta');
-  } else if (fondoActual === 'fondo1' && piesEnPortal()) {
-    // Por qué ganar al instante sin desplazar: coherente con "pies en PORTAL
-    // ganan", sin excepción de 1 px (spec 02, decisiones); ganar() ya cambia a
-    // fondo2, muestra el overlay y guarda el estado victoria.
-    ganar();
-    player.moving = false;
-    player.idleT0 = ahora;
-  }
-  try {
-    lastSavedJson = JSON.stringify(snapshot());
-  } catch {
-    lastSavedJson = null;
-  }
-  lastSaveTime = ahora; // Por qué: reinicia el throttle para no guardar en el mismo frame.
-  btnContinuar.blur(); // Por qué blur: evita re-disparos del botón (modelo de datos).
 }
 
 // Por qué ganar: centraliza el paso jugando→victoria al pisar el portal con los pies
 // (player.x/y son el punto shadow), cambia directo a fondo2, vacía teclas y muestra el overlay.
+// Por qué sin guardar aquí: el paso 4 quita el guardado puntual al ganar; solo el
+// botón Guardar escribe (criterio 2: ganar no cambia ningún slotN hasta pulsar Guardar).
 function ganar() {
   if (estado !== 'jugando') return;
   estado = 'victoria';
   fondoActual = 'fondo2'; // Por qué directo: el spec descarta fundido; ambos fondos miden 2752×1536 con el mismo encuadre.
   pressed.clear(); // Por qué: al ganar se vacía (modelo de datos) para no arrastrar flechas.
   pantallaVictoria.classList.remove('oculta');
-  // Por qué guardado puntual aquí: en victoria nada se mueve, así que el throttle
-  // (solo activo en jugando) nunca lo persistiría; esto fija estado:'victoria'+fondo2 (criterio 3).
-  escribirGuardado();
 }
 
 // Por qué volverAEmpezar: aplica el reset completo del spec (480,400,'down',fondo1,
 // teclas vaciadas, relojes repuestos) y vuelve a 'inicio' para repetir el ciclo inicio→juego→victoria→inicio.
-// Por qué borra el guardado y oculta Continuar: evita que la partida vieja resucite
-// tras el reset (paso 3, criterio 9) y deja el inicio limpio con foco en Empezar.
+// Por qué sin borrar ni guardar: el paso 4 elimina el borrado; volver no escribe
+// ni borra ranuras y deja el inicio limpio con foco en Empezar. El HUD se oculta.
 function volverAEmpezar() {
   if (estado !== 'victoria') return;
-  borrarGuardado();
   estado = 'inicio';
   fondoActual = 'fondo1';
   player.x = 480;
@@ -237,31 +180,45 @@ function volverAEmpezar() {
   player.idleT0 = ahora;
   pressed.clear(); // Por qué: al volver se vacía (modelo de datos).
   pantallaVictoria.classList.add('oculta');
-  btnContinuar.classList.add('oculta');
+  hud.classList.add('oculta');
+  msgGuardado.textContent = '';
   pantallaInicio.classList.remove('oculta');
   if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: deja el foco listo para el siguiente Enter.
 }
 
-btnEmpezar.addEventListener('click', nuevaPartida);
-btnContinuar.addEventListener('click', continuar);
-btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
-// Por qué leer y validar al arrancar: si hay guardado válido (jugando o victoria)
-// se muestra Continuar con el foco; si no (ausente o inválido), queda oculta y el
-// foco va a Empezar (criterios 4 y 10).
-if (esGuardadoValido(leerGuardado())) {
-  btnContinuar.classList.remove('oculta');
-  if (document.activeElement !== btnContinuar) btnContinuar.focus();
-} else {
-  btnContinuar.classList.add('oculta');
-  if (document.activeElement !== btnEmpezar) btnEmpezar.focus();
+// Por qué ranuraSeleccionada: el selector del HUD fija dónde escribe Guardar;
+// por defecto 1 y se valida a 1..NUM_RANURAS para no escribir claves arbitrarias.
+function ranuraSeleccionada() {
+  const checked = document.querySelector('input[name="ranura"]:checked');
+  const n = checked ? Number.parseInt(checked.value, 10) : 1;
+  if (!Number.isInteger(n) || n < 1 || n > NUM_RANURAS) return 1;
+  return n;
 }
+
+// Por qué este handler: es el único punto de escritura del juego (paso 4).
+// Guarda x/y/dir/fondo/savedAt en `SAVE_SLOT_PREFIX + N` y confirma con el
+// literal exacto `Partida N guardada` (criterios 4 y 5).
+function alPulsarGuardar() {
+  if (estado !== 'jugando' && estado !== 'victoria') return;
+  const n = ranuraSeleccionada();
+  if (guardarEnRanura(n)) {
+    msgGuardado.textContent = `Partida ${n} guardada`;
+  }
+  btnGuardar.blur(); // Por qué blur: evita re-disparos con Espacio/Enter.
+}
+
+btnEmpezar.addEventListener('click', nuevaPartida);
+btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
+btnGuardar.addEventListener('click', alPulsarGuardar);
+// Por qué foco inicial siempre en Empezar: el paso 4 aún no tiene lista de
+// partidas (llega en el paso 5); Enter en inicio es siempre nueva partida.
+if (document.activeElement !== btnEmpezar) btnEmpezar.focus();
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && estado === 'inicio') {
-    // Por qué un solo camino de teclado según contexto: con guardado válido
-    // Enter es Continuar y Empezar queda solo por clic; sin guardado, Enter es nueva partida.
-    if (esGuardadoValido(leerGuardado())) continuar();
-    else nuevaPartida();
+    // Por qué siempre nueva partida: el paso 4 aún no tiene Continuar por ranura
+    // (llega en el paso 5); Empezar no toca ranuras.
+    nuevaPartida();
     return;
   }
   if (e.key === ' ' || e.key === 'Spacebar') {
@@ -278,15 +235,8 @@ window.addEventListener('keyup', (e) => {
   if (ARROWS.has(e.key)) pressed.delete(e.key);
 });
 window.addEventListener('blur', () => pressed.clear()); // Por qué: si se pierde el foco no queda una tecla "pegada".
-// Por qué solo pagehide (sin beforeunload/visibilitychange): un solo hook cubre
-// el cierre en móvil y escritorio sin duplicar eventos (spec 02, decisiones).
-window.addEventListener('pagehide', () => {
-  try {
-    escribirGuardado();
-  } catch {
-    // Por qué silencio: al cerrar no hay nada que mostrar; escribirGuardado ya filtra por estado.
-  }
-});
+// Por qué sin pagehide/beforeunload/visibilitychange: el paso 4 elimina el
+// autoguardado al cerrar; cerrar/recargar no guarda nada solo (criterio 3).
 
 // Por qué 8 direcciones: las hojas ya traen las 8 filas y así Charizard
 // mira hacia donde va también en diagonal.
@@ -402,13 +352,8 @@ async function main() {
       player.idleT0 = now;
     }
 
-    // Por qué throttle solo en jugando y tras mover/ganar: en inicio/victoria nada
-    // se mueve (victoria ya se guardó en ganar()); se actualiza lastSaveTime en cada
-    // intento para serializar como máximo 1 vez/s y escribirGuardado descarta si el JSON no cambió.
-    if (estado === 'jugando' && now - lastSaveTime >= SAVE_EVERY_MS) {
-      lastSaveTime = now;
-      escribirGuardado();
-    }
+    // Por qué sin throttle aquí: el paso 4 quita el autoguardado del frame();
+    // moverse sin pulsar Guardar no crea ni cambia ningún slotN (criterio 1).
 
     // Por qué mapa de imágenes: drawBackground elige el recorte por fondoActual pero necesita la imagen precargada.
     drawBackground(fondoActual === 'fondo1' ? bgBosqueImg : bgVolcanImg);

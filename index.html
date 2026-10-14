@@ -21,6 +21,12 @@
     .pantalla h1 { margin: 0; font-size: 28px; }
     .pantalla p { font-size: 15px; }
     .pantalla button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
+    /* Por qué #hud fuera del canvas: no tapa el portal ni a Charizard (criterio 12). */
+    #hud { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+    /* Por qué #hud.oculta después: el ID supera a la clase .oculta y sin esto el HUD no se ocultaría en inicio. */
+    #hud.oculta { display: none; }
+    #hud button { font-size: 14px; padding: 8px 16px; cursor: pointer; }
+    #msg-guardado { min-width: 160px; opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -30,12 +36,20 @@
       <h1>Charizard: del bosque al volcán</h1>
       <p>Llega al portal del este para alcanzar el volcán.</p>
       <button id="btn-empezar" type="button">Empezar aventura</button>
-      <button id="btn-continuar" type="button" class="oculta">Continuar aventura</button>
     </div>
     <div id="pantalla-victoria" class="pantalla oculta">
       <h1>¡Llegaste al Volcán!</h1>
       <button id="btn-reiniciar" type="button">Volver a empezar</button>
     </div>
+  </div>
+  <div id="hud" class="oculta">
+    <button id="btn-guardar" type="button">Guardar</button>
+    <span id="slot-selector" role="radiogroup" aria-label="Ranura de guardado">
+      <label><input type="radio" name="ranura" value="1" checked /> Ranura 1</label>
+      <label><input type="radio" name="ranura" value="2" /> Ranura 2</label>
+      <label><input type="radio" name="ranura" value="3" /> Ranura 3</label>
+    </span>
+    <span id="msg-guardado" aria-live="polite"></span>
   </div>
   <p>Flechas del teclado para mover a Charizard</p>
   <script type="module" src="game.js"></script>

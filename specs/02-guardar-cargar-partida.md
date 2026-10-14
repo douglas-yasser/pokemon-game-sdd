@@ -12,7 +12,7 @@ Conservar en `localStorage` hasta 3 partidas manuales (posición de Charizard, f
 - Lista de partidas en la pantalla de inicio con una fila por ranura: fecha (`savedAt`), zona (`Bosque`/`Volcán`) y un botón `Continuar` por ranura. Las vacías dicen `Vacía`. Una ranura alterada se muestra como vacía.
 - `Continuar` por ranura, que restaura posición, dirección, fondo y estado (bosque jugable o victoria tal cual).
 - `Empezar aventura` solo inicia una partida nueva (`480,400,'down',fondo1` → `jugando`) y no toca ninguna ranura. No hay modal de sobrescribir.
-- `Volver al menú` en el HUD (`jugando`) y en la victoria (modifica el overlay `#pantalla-victoria` del spec 01): vuelve a `inicio` sin preguntar, sin guardar y sin borrar. Foco y `Enter` según haya o no ranuras válidas.
+- `Volver al menú` solo en el HUD (`#btn-menu`), visible en jugando y victoria; `#pantalla-victoria` no cambia: vuelve a `inicio` sin preguntar, sin guardar y sin borrar. Foco y `Enter` según haya o no ranuras válidas.
 
 ### No entra
 
@@ -28,7 +28,7 @@ Conservar en `localStorage` hasta 3 partidas manuales (posición de Charizard, f
 ### Relación con el spec 01
 
 - Reutiliza los estados `inicio | jugando | victoria`, `fondoActual`, `player`, `PORTAL` y los overlays `#pantalla-inicio / #pantalla-victoria` con `.oculta` definidos en el spec 01.
-- Añade "Volver al menú" a #pantalla-victoria y un HUD en jugando; el ciclo inicio→juego→victoria→inicio y los literales no cambian.
+- Añade "Volver al menú" solo en el HUD (`#btn-menu`), visible en jugando y victoria; `#pantalla-victoria` no cambia; el ciclo inicio→juego→victoria→inicio y los literales no cambian.
 
 ## 3. Modelo de datos
 
@@ -39,7 +39,7 @@ Nombres que usará la implementación:
 - Guardado por ranura: `{ v: 1, estado: 'jugando' | 'victoria', fondoActual: 'fondo1' | 'fondo2', player: { x: 0..960, y: 0..540, dir: 8 dirs }, savedAt: timestamp }`. Por qué se añade `savedAt`: la lista necesita la fecha; antes se descartó porque nada lo leía.
 - El paso 4 elimina `SAVE_KEY`, `SAVE_EVERY_MS`, `lastSavedJson`/`lastSaveTime` y `borrarGuardado()`. Por qué: eran el autoguardado y el borrado; el único punto de escritura pasa a ser el botón `Guardar`.
 - Funciones: `snapshot()` (añade `savedAt: Date.now()`), `leerRanura(i)`, `guardarEnRanura(i)`, `listarRanuras()`, `esGuardadoValido(o)` (igual que en pasos 1–3, con `savedAt` opcional: si falta o no es número la ranura sigue válida pero muestra "sin fecha"), `continuarDesde(i)`, `nuevaPartida()` (solo resetea, no toca ranuras).
-- DOM: `#btn-guardar` y `#btn-menu` en el HUD (visibles en `jugando` y en `victoria`), selector de 3 ranuras + `#msg-guardado` (`Partida N guardada`), y `#lista-partidas` en `#pantalla-inicio` (una fila por ranura con fecha + `Bosque`/`Volcán` + `Continuar`; `Vacía` con botón deshabilitado).
+- DOM: `#btn-guardar` y `#btn-menu` solo en el HUD, visibles en `jugando` y en `victoria` (`#pantalla-victoria` no cambia), selector de 3 ranuras + `#msg-guardado` (`Partida N guardada`), y `#lista-partidas` en `#pantalla-inicio` (una fila por ranura con fecha + `Bosque`/`Volcán` + `Continuar`; `Vacía` con botón deshabilitado).
 - Reglas de foco/teclado en `inicio`: con al menos una ranura válida, foco inicial en el primer `Continuar` y `Enter` → ese `continuarDesde(i)`; sin ranuras válidas, foco en Empezar y `Enter` → nueva partida.
 - Tras `continuarDesde(i)` y tras nueva partida se llama `blur()` para quitar el foco del botón; `pressed` se vacía y `walkT0/idleT0` se reponen a `now`.
 
@@ -50,7 +50,7 @@ Nombres que usará la implementación:
 3. **Restaurar victoria y borrados:** `continuar()` acepta también `victoria` (volcán + overlay `¡Llegaste al Volcán!`) y `volverAEmpezar()` borra el guardado; si al restaurar los pies caen en `PORTAL`, se gana al instante sin desplazar; el juego queda con el ciclo completo persistente.
 4. **Botón Guardar con ranuras y sin autoguardado (deja el juego funcionando):** quitar throttle del `frame()`, guardado en `ganar()`, listener `pagehide` y llamadas a `borrarGuardado()`; añadir `SAVE_SLOT_PREFIX`, `guardarEnRanura(i)` y HUD con `#btn-guardar` + selector de 3 ranuras + `#msg-guardado` (`Partida N guardada`); `nuevaPartida()` ya no toca ranuras. Efecto: se juega bosque→volcán igual, moverse sin guardar no crea `slotN`, y guardar crea `...slotN` con `x/y/dir/fondo/savedAt`. Se verifica en DevTools → Application → Local Storage, porque aún no hay lista de partidas.
 5. **Lista de partidas en inicio con Continuar por ranura (deja el juego funcionando):** añadir `#lista-partidas` con 3 filas (fecha + `Bosque`/`Volcán` + `Continuar`, o `Vacía` deshabilitada), `listarRanuras()` + `continuarDesde(i)` + refresco al entrar en `inicio`; `Enter` enfoca el primer Continuar disponible o Empezar si todo vacío. Efecto: recargar muestra las 3 ranuras y cada Continuar devuelve a su punto exacto.
-6. **Botón Volver al menú, también desde la victoria (deja el juego funcionando):** `#btn-menu` en el HUD (`jugando`) y en `#pantalla-victoria`; vuelve a `inicio` (inicio limpio en `fondo1/480,400/down`, lista refrescada) sin preguntar, sin guardar y sin borrar. Efecto: salir a mitad del bosque o desde victoria no escribe ni borra nada.
+6. **Botón Volver al menú solo en el HUD (deja el juego funcionando):** `#btn-menu` solo en el HUD, visible en jugando y victoria; `#pantalla-victoria` no cambia; vuelve a `inicio` (inicio limpio en `fondo1/480,400/down`, lista refrescada) sin preguntar, sin guardar y sin borrar. Efecto: salir a mitad del bosque o desde victoria no escribe ni borra nada.
 
 Nota: los pasos 1 a 3 ya están hechos y no se reescriben; los pasos 4 a 6 sustituyen su comportamiento (ya no hay autoguardado ni borrado).
 
@@ -94,6 +94,7 @@ Pasos 4–6 (guardado manual, vigente):
 - **Añadir `savedAt`:** por qué — la lista necesita la fecha; se valida como opcional para no invalidar por un campo de muestra.
 - **`Empezar` no toca ranuras:** por qué — tocarlas al empezar sería un borrado encubierto.
 - **`Volver al menú` sin preguntar ni guardar:** por qué — mantiene "guardar solo con Guardar" puro, sin guardados ocultos al salir.
+- **Un solo botón Volver al menú:** por qué — un segundo botón en la victoria hacía lo mismo y duplicaba el camino.
 - **`Guardar` visible en `jugando` y en `victoria`:** por qué — la victoria también es una partida que el jugador puede querer conservar, y antes se guardaba sola al ganar.
 - **Al volver al menú se repone fondo1/480,400/down:** por qué — el inicio se dibuja siempre igual y no se queda mostrando el volcán.
 - **Ranura alterada → se muestra `Vacía`:** por qué — misma regla "inválido → descartar todo", evita resucitar corrupción.

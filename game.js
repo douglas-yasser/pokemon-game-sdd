@@ -25,6 +25,15 @@ function loadImage(src) {
 // 'victoria' se define en el paso 3; aquí solo existe el valor inicial 'inicio'.
 let estado = 'inicio';
 
+// Estado del fondo según spec 01: en el paso 2 siempre es 'fondo1' (bosque).
+// Por qué existe ya: el paso 2 exige dibujar el portal solo en el bosque,
+// y el paso 3 lo usará para el cambio directo a 'fondo2' (aquí aún no cambia).
+const fondoActual = 'fondo1';
+
+// Por qué estas medidas: derivadas de W=960,H=540 (960-80=880, (540-240)/2=150),
+// franja fija de 80×240 en el borde derecho (decisión del spec, sin nuevos assets).
+const PORTAL = { x: 880, y: 150, w: 80, h: 240 };
+
 // Estado del jugador: (x, y) son los pies (punto shadow), dir una de las
 // 8 direcciones de DIRECTIONS, y los relojes marcan cuándo empezó cada animación.
 const player = { x: 480, y: 400, dir: 'down', moving: false, walkT0: 0, idleT0: 0 };
@@ -94,6 +103,28 @@ function drawBackground(bgImg) {
   ctx.drawImage(bgImg, bg.sx, bg.sy, bg.sw, bg.sh, (W - dw) / 2, (H - dh) / 2, dw, dh);
 }
 
+function drawPortal() {
+  // Por qué gating por fondo: el portal es el objetivo visible solo en el bosque;
+  // en el volcán no se dibuja (criterio 4). En este paso fondoActual siempre es bosque.
+  if (fondoActual !== 'fondo1') return;
+  ctx.save();
+  // Por qué relleno tenue + borde dorado grueso: se ve al este sin ocultar el bosque ni usar assets nuevos.
+  ctx.fillStyle = 'rgba(255, 215, 0, 0.15)';
+  ctx.fillRect(PORTAL.x, PORTAL.y, PORTAL.w, PORTAL.h);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#FFD700';
+  ctx.strokeRect(PORTAL.x, PORTAL.y, PORTAL.w, PORTAL.h);
+  // Por qué etiqueta encima: en 80 px de ancho el texto no cabe dentro (decisión de valores por defecto).
+  // Por qué literal exacto '→ volcán': lo fija el spec para consistencia overlay/canvas.
+  ctx.font = '16px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText('→ volcán', PORTAL.x + PORTAL.w / 2, PORTAL.y - 8);
+  ctx.restore();
+  // Por qué sin colisión en este paso: el spec lo pide solo visible; tocarlo aún no hace nada (paso 3).
+}
+
 function drawCharizard(img, anim, dir, elapsedMs) {
   // Por qué getFrame/frameIndexAt: respetan las duraciones en ticks del XML
   // (regla 3 del README) en vez de reimplementar el temporizado.
@@ -147,6 +178,9 @@ async function main() {
     const img = player.moving ? walkImg : idleImg;
     const t0 = player.moving ? player.walkT0 : player.idleT0;
     drawCharizard(img, anim, player.dir, now - t0);
+    // Por qué después de Charizard: el borde dorado queda siempre visible como objetivo,
+    // aunque el jugador se pare encima de la franja.
+    drawPortal();
 
     requestAnimationFrame(frame);
   }

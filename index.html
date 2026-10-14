@@ -27,6 +27,9 @@
     #hud.oculta { display: none; }
     #hud button { font-size: 14px; padding: 8px 16px; cursor: pointer; }
     #msg-guardado { min-width: 160px; opacity: 0.9; }
+    /* Por qué #lista-partidas en columna: una fila por ranura (fecha + zona + Continuar) sin tapar el botón Empezar. */
+    #lista-partidas { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+    #lista-partidas button { font-size: 14px; padding: 6px 14px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -36,6 +39,7 @@
       <h1>Charizard: del bosque al volcán</h1>
       <p>Llega al portal del este para alcanzar el volcán.</p>
       <button id="btn-empezar" type="button">Empezar aventura</button>
+      <div id="lista-partidas"></div>
     </div>
     <div id="pantalla-victoria" class="pantalla oculta">
       <h1>¡Llegaste al Volcán!</h1>

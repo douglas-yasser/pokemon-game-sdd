@@ -130,6 +130,7 @@ const btnReiniciar = document.getElementById('btn-reiniciar');
 const hud = document.getElementById('hud');
 const btnGuardar = document.getElementById('btn-guardar');
 const msgGuardado = document.getElementById('msg-guardado');
+const listaPartidas = document.getElementById('lista-partidas');
 
 // Por qué nuevaPartida no toca ranuras: tocarlas al empezar sería un borrado
 // encubierto (spec 02, paso 4). Solo resetea al inicio del bosque y muestra el HUD.
@@ -183,7 +184,102 @@ function volverAEmpezar() {
   hud.classList.add('oculta');
   msgGuardado.textContent = '';
   pantallaInicio.classList.remove('oculta');
-  if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: deja el foco listo para el siguiente Enter.
+  // Por qué refrescar + enfocar aquí: al entrar en inicio la lista debe mostrar
+  // las 3 ranuras actuales y el foco sigue la regla del paso 5 (modelo de datos).
+  refrescarLista();
+  enfocarInicio();
+}
+
+// Por qué listarRanuras devuelve null en vacías/corruptas: una ranura alterada
+// se muestra como Vacía y su Continuar no hace nada (criterio 7); el null
+// reutiliza la validación estricta sin invalidar las otras ranuras.
+function listarRanuras() {
+  const res = [];
+  for (let i = 1; i <= NUM_RANURAS; i += 1) {
+    const o = leerRanura(i);
+    res.push(esGuardadoValido(o) ? o : null);
+  }
+  return res;
+}
+
+// Por qué refrescarLista reconstruye las 3 filas: fecha + Bosque/Volcán +
+// Continuar, o Vacía con botón deshabilitado (criterio 6). Se llama al entrar
+// en inicio para que recargar muestre las ranuras actuales.
+// Por qué "sin fecha": savedAt es opcional; si falta o no es número la ranura
+// sigue válida pero sin fecha (modelo de datos).
+function refrescarLista() {
+  listaPartidas.replaceChildren(); // Por qué: evita duplicar filas en cada refresco.
+  const ranuras = listarRanuras();
+  ranuras.forEach((o, idx) => {
+    const i = idx + 1;
+    const fila = document.createElement('div');
+    const texto = document.createElement('span');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Continuar';
+    btn.dataset.ranura = String(i);
+    if (o) {
+      const fecha =
+        typeof o.savedAt === 'number' && Number.isFinite(o.savedAt)
+          ? new Date(o.savedAt).toLocaleString()
+          : 'sin fecha';
+      const zona = o.fondoActual === 'fondo2' ? 'Volcán' : 'Bosque';
+      texto.textContent = `Ranura ${i}: ${fecha} — ${zona} `;
+      btn.disabled = false;
+      // Por qué revalidar en continuarDesde: aunque el botón esté habilitado,
+      // una ranura alterada entre el refresco y el clic no hace nada.
+      btn.addEventListener('click', () => continuarDesde(i));
+    } else {
+      texto.textContent = `Ranura ${i}: Vacía `;
+      btn.disabled = true;
+    }
+    fila.appendChild(texto);
+    fila.appendChild(btn);
+    listaPartidas.appendChild(fila);
+  });
+}
+
+// Por qué continuarDesde restaura tal cual: bosque jugable o victoria con su
+// overlay (criterio 8); vacía teclas y repone relojes igual que nuevaPartida.
+// Por qué ganar si cae en PORTAL: coherente con "pies en PORTAL ganan", sin
+// excepción de 1 px (decisión heredada del paso 3).
+function continuarDesde(i) {
+  if (estado !== 'inicio') return;
+  const o = leerRanura(i);
+  if (!esGuardadoValido(o)) return;
+  estado = o.estado;
+  fondoActual = o.fondoActual;
+  player.x = o.player.x;
+  player.y = o.player.y;
+  player.dir = o.player.dir;
+  player.moving = false;
+  const ahora = performance.now();
+  player.walkT0 = ahora; // Por qué reponer: evita retomar a mitad de ciclo.
+  player.idleT0 = ahora;
+  pressed.clear(); // Por qué: evita que una flecha pulsada tras el overlay mueva de golpe.
+  pantallaInicio.classList.add('oculta');
+  if (estado === 'victoria') {
+    pantallaVictoria.classList.remove('oculta');
+  }
+  hud.classList.remove('oculta');
+  msgGuardado.textContent = '';
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); // Por qué blur: evita re-disparos con Espacio/Enter.
+  if (estado === 'jugando' && fondoActual === 'fondo1' && piesEnPortal()) {
+    ganar();
+    player.moving = false;
+    player.idleT0 = performance.now();
+  }
+}
+
+// Por qué enfocarInicio: con al menos una ranura válida el foco inicial va al
+// primer Continuar (y Enter lo continúa); sin ranuras válidas va a Empezar.
+function enfocarInicio() {
+  const primero = listaPartidas.querySelector('button:not([disabled])');
+  if (primero instanceof HTMLElement) {
+    if (document.activeElement !== primero) primero.focus();
+  } else if (document.activeElement !== btnEmpezar) {
+    btnEmpezar.focus();
+  }
 }
 
 // Por qué ranuraSeleccionada: el selector del HUD fija dónde escribe Guardar;
@@ -210,15 +306,19 @@ function alPulsarGuardar() {
 btnEmpezar.addEventListener('click', nuevaPartida);
 btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
 btnGuardar.addEventListener('click', alPulsarGuardar);
-// Por qué foco inicial siempre en Empezar: el paso 4 aún no tiene lista de
-// partidas (llega en el paso 5); Enter en inicio es siempre nueva partida.
-if (document.activeElement !== btnEmpezar) btnEmpezar.focus();
+// Por qué refrescar + enfocar al arrancar: recargar muestra las 3 ranuras y el
+// foco/Enter siguen la regla del paso 5 (primer Continuar o Empezar si todo vacío).
+refrescarLista();
+enfocarInicio();
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && estado === 'inicio') {
-    // Por qué siempre nueva partida: el paso 4 aún no tiene Continuar por ranura
-    // (llega en el paso 5); Empezar no toca ranuras.
-    nuevaPartida();
+    // Por qué primer Continuar o nueva partida: con ranuras válidas Enter
+    // continúa la primera; sin ellas empieza de nuevo (sin tocar ranuras).
+    const ranuras = listarRanuras();
+    const idx = ranuras.findIndex((o) => o !== null);
+    if (idx >= 0) continuarDesde(idx + 1);
+    else nuevaPartida();
     return;
   }
   if (e.key === ' ' || e.key === 'Spacebar') {

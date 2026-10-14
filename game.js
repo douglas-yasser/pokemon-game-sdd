@@ -21,14 +21,13 @@ function loadImage(src) {
   });
 }
 
-// Estado del juego según spec 01 (paso 1): 'inicio' bloquea, 'jugando' permite moverse.
-// 'victoria' se define en el paso 3; aquí solo existe el valor inicial 'inicio'.
+// Estado del juego según spec 01 (paso 3): 'inicio' bloquea, 'jugando' permite moverse,
+// 'victoria' muestra el volcán con el overlay y bloquea las flechas como en 'inicio'.
 let estado = 'inicio';
 
-// Estado del fondo según spec 01: en el paso 2 siempre es 'fondo1' (bosque).
-// Por qué existe ya: el paso 2 exige dibujar el portal solo en el bosque,
-// y el paso 3 lo usará para el cambio directo a 'fondo2' (aquí aún no cambia).
-const fondoActual = 'fondo1';
+// Estado del fondo según spec 01 (paso 3): 'fondo1' (bosque) al cargar y al resetear,
+// cambia directo a 'fondo2' (volcán) al entrar con los pies en PORTAL (sin fundido).
+let fondoActual = 'fondo1';
 
 // Por qué estas medidas: derivadas de W=960,H=540 (960-80=880, (540-240)/2=150),
 // franja fija de 80×240 en el borde derecho (decisión del spec, sin nuevos assets).
@@ -45,7 +44,9 @@ pressed.clear(); // Por qué: estado limpio al cargar (spec 01, modelo de datos)
 const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 const pantallaInicio = document.getElementById('pantalla-inicio');
+const pantallaVictoria = document.getElementById('pantalla-victoria');
 const btnEmpezar = document.getElementById('btn-empezar');
+const btnReiniciar = document.getElementById('btn-reiniciar');
 
 // Por qué función empezar: centraliza el único paso inicio→jugando (clic o Enter),
 // vacía flechas pegadas y oculta el overlay con la clase .oculta.
@@ -56,7 +57,37 @@ function empezar() {
   pantallaInicio.classList.add('oculta');
 }
 
+// Por qué ganar: centraliza el paso jugando→victoria al pisar el portal con los pies
+// (player.x/y son el punto shadow), cambia directo a fondo2, vacía teclas y muestra el overlay.
+function ganar() {
+  if (estado !== 'jugando') return;
+  estado = 'victoria';
+  fondoActual = 'fondo2'; // Por qué directo: el spec descarta fundido; ambos fondos miden 2752×1536 con el mismo encuadre.
+  pressed.clear(); // Por qué: al ganar se vacía (modelo de datos) para no arrastrar flechas.
+  pantallaVictoria.classList.remove('oculta');
+}
+
+// Por qué volverAEmpezar: aplica el reset completo del spec (480,400,'down',fondo1,
+// teclas vaciadas, relojes repuestos) y vuelve a 'inicio' para repetir el ciclo inicio→juego→victoria→inicio.
+function volverAEmpezar() {
+  if (estado !== 'victoria') return;
+  estado = 'inicio';
+  fondoActual = 'fondo1';
+  player.x = 480;
+  player.y = 400;
+  player.dir = 'down';
+  player.moving = false;
+  const ahora = performance.now();
+  player.walkT0 = ahora; // Por qué reponer: evita retomar a mitad de ciclo al repetir.
+  player.idleT0 = ahora;
+  pressed.clear(); // Por qué: al volver se vacía (modelo de datos).
+  pantallaVictoria.classList.add('oculta');
+  pantallaInicio.classList.remove('oculta');
+  if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: deja el foco listo para el siguiente Enter.
+}
+
 btnEmpezar.addEventListener('click', empezar);
+btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
 if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: foco en Empezar (decisión de valores por defecto).
 
 window.addEventListener('keydown', (e) => {
@@ -94,9 +125,10 @@ function dirFromKeys() {
 }
 
 function drawBackground(bgImg) {
-  // Por qué "cover": el bosque es 2752x1536 (ratio 1.79) vs canvas 1.77,
+  // Por qué "cover": ambos fondos son 2752x1536 (ratio 1.79) vs canvas 1.77,
   // casi idéntico; rellena sin bandas con un recorte mínimo.
-  const bg = BACKGROUNDS.fondo1;
+  // Por qué BACKGROUNDS[fondoActual]: el paso 3 cambia directo bosque→volcán manteniendo el mismo encuadre.
+  const bg = BACKGROUNDS[fondoActual];
   const s = Math.max(W / bg.sw, H / bg.sh);
   const dw = bg.sw * s;
   const dh = bg.sh * s;
@@ -105,7 +137,7 @@ function drawBackground(bgImg) {
 
 function drawPortal() {
   // Por qué gating por fondo: el portal es el objetivo visible solo en el bosque;
-  // en el volcán no se dibuja (criterio 4). En este paso fondoActual siempre es bosque.
+  // en el volcán no se dibuja (criterio 4).
   if (fondoActual !== 'fondo1') return;
   ctx.save();
   // Por qué relleno tenue + borde dorado grueso: se ve al este sin ocultar el bosque ni usar assets nuevos.
@@ -122,7 +154,17 @@ function drawPortal() {
   ctx.fillStyle = '#FFD700';
   ctx.fillText('→ volcán', PORTAL.x + PORTAL.w / 2, PORTAL.y - 8);
   ctx.restore();
-  // Por qué sin colisión en este paso: el spec lo pide solo visible; tocarlo aún no hace nada (paso 3).
+}
+
+// Por qué pies (shadow) en el rect: coherente con el anclado del dibujado y con la decisión del spec;
+// el cambio a victoria se hace en el bucle tras mover, no aquí.
+function piesEnPortal() {
+  return (
+    player.x >= PORTAL.x &&
+    player.x <= PORTAL.x + PORTAL.w &&
+    player.y >= PORTAL.y &&
+    player.y <= PORTAL.y + PORTAL.h
+  );
 }
 
 function drawCharizard(img, anim, dir, elapsedMs) {
@@ -138,9 +180,10 @@ function drawCharizard(img, anim, dir, elapsedMs) {
 }
 
 async function main() {
-  // Solo se cargan 3 imágenes: bosque + hojas walk/idle (nada de volcán ni ataque).
-  const [bgImg, walkImg, idleImg] = await Promise.all([
+  // Por qué precargar fondo2 en este paso: el cambio bosque→volcán es directo y debe mostrarse sin tirón al pisar el portal.
+  const [bgBosqueImg, bgVolcanImg, walkImg, idleImg] = await Promise.all([
     loadImage(BACKGROUNDS.fondo1.src),
+    loadImage(BACKGROUNDS.fondo2.src),
     loadImage(CHARIZARD.walk.src.anim),
     loadImage(CHARIZARD.idle.src.anim),
   ]);
@@ -153,8 +196,8 @@ async function main() {
     const dt = Math.min((now - last) / 1000, 0.05); // Por qué tope 0.05s: un tirón no teletransporta al jugador.
     last = now;
 
-    // Por qué gating por estado: en 'inicio' no se procesan flechas y Charizard queda en idle
-    // (el overlay bloquea el juego pero el bosque + idle se siguen dibujando detrás).
+    // Por qué gating por estado: en 'inicio' y en 'victoria' no se procesan flechas y Charizard queda en idle
+    // (los overlays bloquean el juego pero el fondo + idle se siguen dibujando detrás).
     const res = estado === 'jugando' ? dirFromKeys() : null;
     const wasMoving = player.moving;
     player.moving = res !== null;
@@ -173,7 +216,16 @@ async function main() {
       player.idleT0 = now;
     }
 
-    drawBackground(bgImg);
+    // Por qué detectar tras mover y solo en jugando+bosque: los pies ya están en la posición
+    // final del frame y el portal solo es objetivo en fondo1; ganar() cambia a fondo2 y muestra victoria.
+    if (estado === 'jugando' && fondoActual === 'fondo1' && piesEnPortal()) {
+      ganar();
+      player.moving = false; // Por qué: queda quieto en idle bajo el overlay de victoria.
+      player.idleT0 = now;
+    }
+
+    // Por qué mapa de imágenes: drawBackground elige el recorte por fondoActual pero necesita la imagen precargada.
+    drawBackground(fondoActual === 'fondo1' ? bgBosqueImg : bgVolcanImg);
     const anim = player.moving ? 'walk' : 'idle';
     const img = player.moving ? walkImg : idleImg;
     const t0 = player.moving ? player.walkT0 : player.idleT0;

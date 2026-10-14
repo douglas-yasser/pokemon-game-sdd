@@ -82,6 +82,58 @@ function escribirGuardado() {
   }
 }
 
+// Por qué Set de 8 dirs: valida que dir sea una de las filas reales de la hoja
+// (misma lista que DIRECTIONS); cualquier otro string es corrupción y se descarta.
+const DIRS_VALIDAS = new Set([
+  'down',
+  'downRight',
+  'right',
+  'upRight',
+  'up',
+  'upLeft',
+  'left',
+  'downLeft',
+]);
+
+// Por qué leerGuardado devuelve null ante cualquier fallo: clave ausente,
+// JSON roto o localStorage bloqueado (modo privado) equivalen a "sin guardado"
+// y la pantalla de inicio arranca limpia sin romper el juego (criterio 10).
+function leerGuardado() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw == null) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+// Por qué validación estricta con descarte total: evita resucitar posiciones
+// imposibles sujetando a medias (spec 02, decisiones). En este paso 2 solo se
+// acepta estado 'jugando' (bosque); 'victoria' se aceptará en el paso 3.
+function esGuardadoValido(o) {
+  if (o == null || typeof o !== 'object') return false;
+  if (o.v !== 1) return false;
+  if (o.estado !== 'jugando') return false;
+  if (o.fondoActual !== 'fondo1' && o.fondoActual !== 'fondo2') return false;
+  const p = o.player;
+  if (p == null || typeof p !== 'object') return false;
+  if (typeof p.x !== 'number' || !Number.isFinite(p.x) || p.x < 0 || p.x > W) return false;
+  if (typeof p.y !== 'number' || !Number.isFinite(p.y) || p.y < 0 || p.y > H) return false;
+  if (!DIRS_VALIDAS.has(p.dir)) return false;
+  return true;
+}
+
+// Por qué borrarGuardado resetea lastSavedJson: tras borrar, el próximo
+// autoguardado debe escribir la partida nueva sin compararse con la vieja.
+function borrarGuardado() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {
+    // Por qué silencio: el juego sigue igual aunque el borrado falle.
+  }
+  lastSavedJson = null;
+}
 // Solo flechas (sin WASD, según lo acordado). Un Set permite diagonales
 // (dos teclas a la vez) e ignora la auto-repetición del keydown.
 const pressed = new Set();
@@ -92,14 +144,53 @@ const pantallaInicio = document.getElementById('pantalla-inicio');
 const pantallaVictoria = document.getElementById('pantalla-victoria');
 const btnEmpezar = document.getElementById('btn-empezar');
 const btnReiniciar = document.getElementById('btn-reiniciar');
+const btnContinuar = document.getElementById('btn-continuar');
 
-// Por qué función empezar: centraliza el único paso inicio→jugando (clic o Enter),
-// vacía flechas pegadas y oculta el overlay con la clase .oculta.
-function empezar() {
+// Por qué nuevaPartida borra al pulsar y resetea al inicio del bosque:
+// evita que la partida vieja resucite tras el reset (spec 02, decisiones) y
+// cumple el criterio 8 (abajo al centro, mirando abajo, en fondo1).
+function nuevaPartida() {
   if (estado !== 'inicio') return;
+  borrarGuardado();
   estado = 'jugando';
+  fondoActual = 'fondo1';
+  player.x = 480;
+  player.y = 400;
+  player.dir = 'down';
+  player.moving = false;
+  const ahora = performance.now();
+  player.walkT0 = ahora; // Por qué reponer: evita retomar a mitad de ciclo.
+  player.idleT0 = ahora;
   pressed.clear(); // Por qué: evita que una flecha pulsada tras el overlay mueva de golpe.
+  lastSaveTime = ahora; // Por qué: el throttle arranca a contar desde la nueva partida.
   pantallaInicio.classList.add('oculta');
+  btnEmpezar.blur(); // Por qué blur: evita re-disparos del botón con Espacio/Enter (modelo de datos).
+}
+
+// Por qué continuar restaura x/y/dir/fondo y fuerza estado='jugando':
+// este paso 2 solo restaura el bosque; 'victoria' se añadirá en el paso 3.
+function continuar() {
+  if (estado !== 'inicio') return;
+  const g = leerGuardado();
+  if (!esGuardadoValido(g)) return;
+  estado = 'jugando';
+  fondoActual = g.fondoActual;
+  player.x = g.player.x;
+  player.y = g.player.y;
+  player.dir = g.player.dir;
+  player.moving = false;
+  const ahora = performance.now();
+  player.walkT0 = ahora; // Por qué reponer a now: los relojes son transitorios y no se guardan.
+  player.idleT0 = ahora;
+  pressed.clear();
+  try {
+    lastSavedJson = JSON.stringify(snapshot());
+  } catch {
+    lastSavedJson = null;
+  }
+  lastSaveTime = ahora; // Por qué: reinicia el throttle para no guardar en el mismo frame.
+  pantallaInicio.classList.add('oculta');
+  btnContinuar.blur(); // Por qué blur: evita re-disparos del botón (modelo de datos).
 }
 
 // Por qué ganar: centraliza el paso jugando→victoria al pisar el portal con los pies
@@ -134,13 +225,26 @@ function volverAEmpezar() {
   if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: deja el foco listo para el siguiente Enter.
 }
 
-btnEmpezar.addEventListener('click', empezar);
+btnEmpezar.addEventListener('click', nuevaPartida);
+btnContinuar.addEventListener('click', continuar);
 btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
-if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: foco en Empezar (decisión de valores por defecto).
+// Por qué leer y validar al arrancar: si hay guardado válido de bosque se muestra
+// Continuar con el foco; si no (ausente o inválido), queda oculta y el foco va a
+// Empezar (criterios 4 y 10). Solo 'jugando' en este paso 2; 'victoria' entra en el paso 3.
+if (esGuardadoValido(leerGuardado())) {
+  btnContinuar.classList.remove('oculta');
+  if (document.activeElement !== btnContinuar) btnContinuar.focus();
+} else {
+  btnContinuar.classList.add('oculta');
+  if (document.activeElement !== btnEmpezar) btnEmpezar.focus();
+}
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && estado === 'inicio') {
-    empezar(); // Por qué: Enter solo activo en 'inicio' (un solo camino de teclado).
+    // Por qué un solo camino de teclado según contexto: con guardado válido
+    // Enter es Continuar y Empezar queda solo por clic; sin guardado, Enter es nueva partida.
+    if (esGuardadoValido(leerGuardado())) continuar();
+    else nuevaPartida();
     return;
   }
   if (e.key === ' ' || e.key === 'Spacebar') {

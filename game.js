@@ -129,6 +129,7 @@ const btnEmpezar = document.getElementById('btn-empezar');
 const btnReiniciar = document.getElementById('btn-reiniciar');
 const hud = document.getElementById('hud');
 const btnGuardar = document.getElementById('btn-guardar');
+const btnMenu = document.getElementById('btn-menu');
 const msgGuardado = document.getElementById('msg-guardado');
 const listaPartidas = document.getElementById('lista-partidas');
 
@@ -162,6 +163,34 @@ function ganar() {
   fondoActual = 'fondo2'; // Por qué directo: el spec descarta fundido; ambos fondos miden 2752×1536 con el mismo encuadre.
   pressed.clear(); // Por qué: al ganar se vacía (modelo de datos) para no arrastrar flechas.
   pantallaVictoria.classList.remove('oculta');
+}
+
+// Por qué volverAlMenu (paso 6): sale a inicio desde `jugando` o desde
+// `victoria` con el `#btn-menu` del HUD (el HUD sigue visible en victoria,
+// por eso el overlay solo necesita un botón y no se duplica) sin preguntar,
+// sin guardar y sin borrar. Repone el inicio limpio (fondo1/480,400/down),
+// refresca la lista y aplica la regla de foco/Enter del paso 5. No toca localStorage.
+function volverAlMenu() {
+  if (estado !== 'jugando' && estado !== 'victoria') return;
+  estado = 'inicio';
+  fondoActual = 'fondo1';
+  player.x = 480;
+  player.y = 400;
+  player.dir = 'down';
+  player.moving = false;
+  const ahora = performance.now();
+  player.walkT0 = ahora; // Por qué reponer: evita retomar a mitad de ciclo al repetir.
+  player.idleT0 = ahora;
+  pressed.clear(); // Por qué: al volver se vacía (modelo de datos).
+  pantallaVictoria.classList.add('oculta');
+  hud.classList.add('oculta');
+  msgGuardado.textContent = '';
+  pantallaInicio.classList.remove('oculta');
+  // Por qué refrescar + enfocar aquí: al entrar en inicio la lista debe mostrar
+  // las 3 ranuras actuales y el foco sigue la regla del paso 5 (modelo de datos).
+  refrescarLista();
+  enfocarInicio();
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); // Por qué blur: evita re-disparos con Espacio/Enter.
 }
 
 // Por qué volverAEmpezar: aplica el reset completo del spec (480,400,'down',fondo1,
@@ -305,6 +334,7 @@ function alPulsarGuardar() {
 
 btnEmpezar.addEventListener('click', nuevaPartida);
 btnReiniciar.addEventListener('click', volverAEmpezar); // Por qué solo clic: Enter se ignora en victoria para evitar reinicios accidentales.
+btnMenu.addEventListener('click', volverAlMenu);
 btnGuardar.addEventListener('click', alPulsarGuardar);
 // Por qué refrescar + enfocar al arrancar: recargar muestra las 3 ranuras y el
 // foco/Enter siguen la regla del paso 5 (primer Continuar o Empezar si todo vacío).

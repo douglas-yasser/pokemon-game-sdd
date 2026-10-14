@@ -21,6 +21,10 @@ function loadImage(src) {
   });
 }
 
+// Estado del juego según spec 01 (paso 1): 'inicio' bloquea, 'jugando' permite moverse.
+// 'victoria' se define en el paso 3; aquí solo existe el valor inicial 'inicio'.
+let estado = 'inicio';
+
 // Estado del jugador: (x, y) son los pies (punto shadow), dir una de las
 // 8 direcciones de DIRECTIONS, y los relojes marcan cuándo empezó cada animación.
 const player = { x: 480, y: 400, dir: 'down', moving: false, walkT0: 0, idleT0: 0 };
@@ -28,9 +32,34 @@ const player = { x: 480, y: 400, dir: 'down', moving: false, walkT0: 0, idleT0: 
 // Solo flechas (sin WASD, según lo acordado). Un Set permite diagonales
 // (dos teclas a la vez) e ignora la auto-repetición del keydown.
 const pressed = new Set();
+pressed.clear(); // Por qué: estado limpio al cargar (spec 01, modelo de datos).
 const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
+const pantallaInicio = document.getElementById('pantalla-inicio');
+const btnEmpezar = document.getElementById('btn-empezar');
+
+// Por qué función empezar: centraliza el único paso inicio→jugando (clic o Enter),
+// vacía flechas pegadas y oculta el overlay con la clase .oculta.
+function empezar() {
+  if (estado !== 'inicio') return;
+  estado = 'jugando';
+  pressed.clear(); // Por qué: evita que una flecha pulsada tras el overlay mueva de golpe.
+  pantallaInicio.classList.add('oculta');
+}
+
+btnEmpezar.addEventListener('click', empezar);
+if (document.activeElement !== btnEmpezar) btnEmpezar.focus(); // Por qué: foco en Empezar (decisión de valores por defecto).
+
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && estado === 'inicio') {
+    empezar(); // Por qué: Enter solo activo en 'inicio' (un solo camino de teclado).
+    return;
+  }
+  if (e.key === ' ' || e.key === 'Spacebar') {
+    e.preventDefault(); // Por qué: Espacio no es acción de juego, solo evita el scroll (criterio 10).
+    return;
+  }
+  // Por qué: R no se escucha a propósito (sin acción de juego, criterio 10).
   if (ARROWS.has(e.key)) {
     e.preventDefault(); // Por qué: evita que la página haga scroll con las flechas.
     pressed.add(e.key);
@@ -93,7 +122,9 @@ async function main() {
     const dt = Math.min((now - last) / 1000, 0.05); // Por qué tope 0.05s: un tirón no teletransporta al jugador.
     last = now;
 
-    const res = dirFromKeys();
+    // Por qué gating por estado: en 'inicio' no se procesan flechas y Charizard queda en idle
+    // (el overlay bloquea el juego pero el bosque + idle se siguen dibujando detrás).
+    const res = estado === 'jugando' ? dirFromKeys() : null;
     const wasMoving = player.moving;
     player.moving = res !== null;
     if (player.moving) {

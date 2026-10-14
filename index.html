@@ -10,10 +10,32 @@
            background: #101418; color: #e8e8e8; font-family: sans-serif; }
     canvas { image-rendering: pixelated; border: 2px solid #333; background: #000; }
     p { margin: 0; font-size: 14px; opacity: 0.85; }
+    /* Por qué #escena relativo: los overlays .pantalla se posicionan sobre el canvas. */
+    #escena { position: relative; width: 960px; height: 540px; }
+    /* Por qué overlay semitransparente: bloquea el juego pero deja ver el bosque + Charizard en idle detrás. */
+    .pantalla { position: absolute; inset: 0; display: flex; flex-direction: column;
+           align-items: center; justify-content: center; gap: 12px;
+           background: rgba(0, 0, 0, 0.65); text-align: center; }
+    /* Por qué .oculta con display:none: único mecanismo de ocultar (el atributo hidden se anula con display:flex). */
+    .oculta { display: none; }
+    .pantalla h1 { margin: 0; font-size: 28px; }
+    .pantalla p { font-size: 15px; }
+    .pantalla button { font-size: 16px; padding: 10px 20px; cursor: pointer; }
   </style>
 </head>
 <body>
-  <canvas id="game" width="960" height="540"></canvas>
+  <div id="escena">
+    <canvas id="game" width="960" height="540"></canvas>
+    <div id="pantalla-inicio" class="pantalla">
+      <h1>Charizard: del bosque al volcán</h1>
+      <p>Llega al portal del este para alcanzar el volcán.</p>
+      <button id="btn-empezar" type="button">Empezar aventura</button>
+    </div>
+    <div id="pantalla-victoria" class="pantalla oculta">
+      <h1>¡Llegaste al Volcán!</h1>
+      <button id="btn-reiniciar" type="button">Volver a empezar</button>
+    </div>
+  </div>
   <p>Flechas del teclado para mover a Charizard</p>
   <script type="module" src="game.js"></script>
 </body>

@@ -11,7 +11,7 @@ Dar a Charizard un inicio con pantalla previa, un objetivo visible que lo lleve 
 - Pantalla de inicio que bloquea el juego hasta pulsar `Empezar aventura` (clic o `Enter`).
 - Objetivo visible en el bosque: franja portal de 80×240 en el borde derecho con borde dorado y texto `→ volcán`.
 - Cambio directo de fondo `fondo1` (bosque) a `fondo2` (volcán) al tocar el portal.
-- Pantalla de victoria con literal `¡Llegaste al Volcán!` y botón `Volver a empezar` (solo ratón) que regresa a la pantalla de inicio con estado reseteado, además del botón `Volver al menú` (`#btn-menu`) que vuelve a inicio.
+- Pantalla de victoria con literal `¡Llegaste al Volcán!` y botón `Volver a empezar` (solo ratón) que regresa a la pantalla de inicio con estado reseteado. El botón `Volver al menú` (`#btn-menu`) está en el HUD, visible también en victoria, y vuelve a inicio.
 - Reset al reiniciar: posición `(480, 400)`, dirección `'down'`, fondo `'fondo1'`, teclas vaciadas.
 
 ### No entra
@@ -35,14 +35,14 @@ Nombres que usará la implementación:
 - `PORTAL`: `{ x: 880, y: 150, w: 80, h: 240 }` (derivado de `W=960, H=540`: `960-80=880`, `(540-240)/2=150`).
 - `player`: `{ x: 480, y: 400, dir: 'down', moving: false, walkT0, idleT0 }` (los relojes se reponen en cada reset).
 - `pressed`: `Set` de flechas pulsadas; se vacía al cargar, al empezar, al ganar y al volver.
-- Capas DOM: `#escena` (contenedor relativo), `#pantalla-inicio.pantalla`, `#pantalla-victoria.pantalla.oculta`, botones `#btn-empezar`, `#btn-reiniciar` y `#btn-menu`.
+- Capas DOM: `#escena` (contenedor relativo), `#pantalla-inicio.pantalla`, `#pantalla-victoria.pantalla.oculta`, botones `#btn-empezar` y `#btn-reiniciar` en sus pantallas, y `#btn-menu` en el HUD (fuera de `#pantalla-victoria`, visible también en victoria).
 - Clase CSS `.oculta { display: none; }` como único mecanismo de ocultar pantallas (no atributo `hidden`).
 
 ## 4. Plan
 
 1. **Pantalla de inicio:** overlay en `index.html` (`#escena`, `#pantalla-inicio` visible, `#pantalla-victoria.oculta`, CSS `.pantalla` / `.oculta`), estado `estado='inicio'` que dibuja el bosque con Charizard en `idle` sin procesar flechas, y botón `Empezar aventura` (clic o `Enter` solo en `inicio`) que pasa a `jugando`. Efecto visible: al abrir hay inicio que bloquea; al pulsar Empezar se juega y se camina en 8 direcciones.
 2. **Portal visible en el bosque, sin colisión todavía:** dibujar en el canvas el rect `PORTAL={880,150,80,240}` con borde dorado y texto `→ volcán` solo cuando el fondo es bosque. Efecto visible: el objetivo se ve al este durante el juego, pero tocarlo aún no hace nada.
-3. **Victoria y reinicio:** detectar la entrada de los pies (`shadow`) en `PORTAL` para cambiar a `fondo2` (precargado en este paso) y mostrar la pantalla de victoria con `¡Llegaste al Volcán!`; el botón `Volver a empezar` (solo clic) aplica reset completo (`480,400,'down',fondo1`, teclas vaciadas, relojes repuestos) y vuelve a `inicio`. Efecto visible: tocar el portal muestra el volcán con victoria, y Volver deja el juego de nuevo en inicio listo para repetir el ciclo. Nota: el botón `Volver al menú` (`#btn-menu`), que vuelve a inicio, fue añadido por el spec 02.
+3. **Victoria y reinicio:** detectar la entrada de los pies (`shadow`) en `PORTAL` para cambiar a `fondo2` (precargado en este paso) y mostrar la pantalla de victoria con `¡Llegaste al Volcán!`; el botón `Volver a empezar` (solo clic) aplica reset completo (`480,400,'down',fondo1`, teclas vaciadas, relojes repuestos) y vuelve a `inicio`. Efecto visible: tocar el portal muestra el volcán con victoria, y Volver deja el juego de nuevo en inicio listo para repetir el ciclo. Nota: el botón `Volver al menú` (`#btn-menu`) vive en el HUD, visible también en victoria (no dentro de `#pantalla-victoria`), que vuelve a inicio, fue añadido por el spec 02.
 
 ## 5. Criterios de aceptación
 

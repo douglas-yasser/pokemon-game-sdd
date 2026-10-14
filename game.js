@@ -1,0 +1,132 @@
+import { BACKGROUNDS, CHARIZARD, getFrame, frameIndexAt } from './spritesheet.js';
+
+// Por qué estas constantes: W/H fijan el canvas acordado (960x540),
+// SCALE=2 duplica el sprite de 56x72 a 112x144 para que se aprecie,
+// SPEED=220 px/s da un caminar visible (~3.6 px/frame a 60fps).
+const W = 960;
+const H = 540;
+const SCALE = 2;
+const SPEED = 220;
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false; // Por qué: mantiene el píxel nítido al escalar 2x.
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('No se pudo cargar: ' + src));
+    img.src = src;
+  });
+}
+
+// Estado del jugador: (x, y) son los pies (punto shadow), dir una de las
+// 8 direcciones de DIRECTIONS, y los relojes marcan cuándo empezó cada animación.
+const player = { x: 480, y: 400, dir: 'down', moving: false, walkT0: 0, idleT0: 0 };
+
+// Solo flechas (sin WASD, según lo acordado). Un Set permite diagonales
+// (dos teclas a la vez) e ignora la auto-repetición del keydown.
+const pressed = new Set();
+const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
+window.addEventListener('keydown', (e) => {
+  if (ARROWS.has(e.key)) {
+    e.preventDefault(); // Por qué: evita que la página haga scroll con las flechas.
+    pressed.add(e.key);
+  }
+});
+window.addEventListener('keyup', (e) => {
+  if (ARROWS.has(e.key)) pressed.delete(e.key);
+});
+window.addEventListener('blur', () => pressed.clear()); // Por qué: si se pierde el foco no queda una tecla "pegada".
+
+// Por qué 8 direcciones: las hojas ya traen las 8 filas y así Charizard
+// mira hacia donde va también en diagonal.
+function dirFromKeys() {
+  const dx = (pressed.has('ArrowRight') ? 1 : 0) - (pressed.has('ArrowLeft') ? 1 : 0);
+  const dy = (pressed.has('ArrowDown') ? 1 : 0) - (pressed.has('ArrowUp') ? 1 : 0);
+  if (dx === 0 && dy === 0) return null;
+  if (dx === 0) return dy > 0 ? ['down', dx, dy] : ['up', dx, dy];
+  if (dy === 0) return dx > 0 ? ['right', dx, dy] : ['left', dx, dy];
+  if (dx > 0 && dy > 0) return ['downRight', dx, dy];
+  if (dx > 0 && dy < 0) return ['upRight', dx, dy];
+  if (dx < 0 && dy > 0) return ['downLeft', dx, dy];
+  return ['upLeft', dx, dy];
+}
+
+function drawBackground(bgImg) {
+  // Por qué "cover": el bosque es 2752x1536 (ratio 1.79) vs canvas 1.77,
+  // casi idéntico; rellena sin bandas con un recorte mínimo.
+  const bg = BACKGROUNDS.fondo1;
+  const s = Math.max(W / bg.sw, H / bg.sh);
+  const dw = bg.sw * s;
+  const dh = bg.sh * s;
+  ctx.drawImage(bgImg, bg.sx, bg.sy, bg.sw, bg.sh, (W - dw) / 2, (H - dh) / 2, dw, dh);
+}
+
+function drawCharizard(img, anim, dir, elapsedMs) {
+  // Por qué getFrame/frameIndexAt: respetan las duraciones en ticks del XML
+  // (regla 3 del README) en vez de reimplementar el temporizado.
+  const i = frameIndexAt(anim, elapsedMs);
+  const f = getFrame(anim, dir, i);
+  // Por qué anclar por shadow (pies): evita que el sprite "salte" al
+  // cambiar entre animaciones (regla 4 del README).
+  const dx = player.x - f.shadow.x * SCALE;
+  const dy = player.y - f.shadow.y * SCALE;
+  ctx.drawImage(img, f.sx, f.sy, f.sw, f.sh, dx, dy, f.sw * SCALE, f.sh * SCALE);
+}
+
+async function main() {
+  // Solo se cargan 3 imágenes: bosque + hojas walk/idle (nada de volcán ni ataque).
+  const [bgImg, walkImg, idleImg] = await Promise.all([
+    loadImage(BACKGROUNDS.fondo1.src),
+    loadImage(CHARIZARD.walk.src.anim),
+    loadImage(CHARIZARD.idle.src.anim),
+  ]);
+
+  player.walkT0 = performance.now();
+  player.idleT0 = performance.now();
+  let last = performance.now();
+
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05); // Por qué tope 0.05s: un tirón no teletransporta al jugador.
+    last = now;
+
+    const res = dirFromKeys();
+    const wasMoving = player.moving;
+    player.moving = res !== null;
+    if (player.moving) {
+      const [dir, dx, dy] = res;
+      player.dir = dir;
+      if (!wasMoving) player.walkT0 = now; // Por qué reiniciar: evita retomar a mitad de ciclo.
+      // Por qué normalizar: sin esto en diagonal iría ~41% más rápido.
+      const len = Math.hypot(dx, dy);
+      player.x += (dx / len) * SPEED * dt;
+      player.y += (dy / len) * SPEED * dt;
+      // Límites del canvas para no salirse de la pantalla.
+      player.x = Math.max(0, Math.min(W, player.x));
+      player.y = Math.max(0, Math.min(H, player.y));
+    } else if (wasMoving) {
+      player.idleT0 = now;
+    }
+
+    drawBackground(bgImg);
+    const anim = player.moving ? 'walk' : 'idle';
+    const img = player.moving ? walkImg : idleImg;
+    const t0 = player.moving ? player.walkT0 : player.idleT0;
+    drawCharizard(img, anim, player.dir, now - t0);
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+main().catch((err) => {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(String(err && err.message ? err.message : err), 20, 40);
+  throw err;
+});

@@ -8,6 +8,13 @@ const H = 540;
 const SCALE = 2;
 const SPEED = 220;
 
+// Por qué clave versionada: una sola ranura en localStorage que sobrevive a
+// cerrar el navegador y permite invalidar el formato con `v` si cambia (spec 02, paso 1).
+const SAVE_KEY = 'pokemonGame.save.v1';
+// Por qué 1000 ms: throttle del spec para no escribir en cada frame (~60 escrituras/s
+// serían coste inútil); basta para ~100 bytes y cumple el criterio 1.
+const SAVE_EVERY_MS = 1000;
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false; // Por qué: mantiene el píxel nítido al escalar 2x.
@@ -37,6 +44,44 @@ const PORTAL = { x: 880, y: 150, w: 80, h: 240 };
 // 8 direcciones de DIRECTIONS, y los relojes marcan cuándo empezó cada animación.
 const player = { x: 480, y: 400, dir: 'down', moving: false, walkT0: 0, idleT0: 0 };
 
+// Por qué lastSavedJson/lastSaveTime: el throttle limita a 1 intento/s y la
+// comparación del string JSON completo detecta cualquier cambio (x/y/dir/
+// estado/fondo) sin comparar campo a campo (spec 02, decisiones).
+let lastSavedJson = null;
+let lastSaveTime = 0;
+
+// Por qué snapshot mínimo sin savedAt: nada lo lee; menos bytes y menos
+// validación (spec 02, decisiones). Incluye v/estado/fondo/player.
+function snapshot() {
+  return {
+    v: 1,
+    estado,
+    fondoActual,
+    player: { x: player.x, y: player.y, dir: player.dir },
+  };
+}
+
+// Por qué escribirGuardado: centraliza el único punto de escritura (throttle,
+// ganar y pagehide lo reutilizan). Solo guarda en jugando/victoria, compara
+// el JSON para no reescribir si nada cambió y traga errores de localStorage
+// (modo privado / cuota) con try/catch para no romper el bucle.
+function escribirGuardado() {
+  if (estado !== 'jugando' && estado !== 'victoria') return;
+  let json;
+  try {
+    json = JSON.stringify(snapshot());
+  } catch {
+    return;
+  }
+  if (json === lastSavedJson) return;
+  try {
+    localStorage.setItem(SAVE_KEY, json);
+    lastSavedJson = json;
+  } catch {
+    // Por qué silencio: el juego debe seguir igual aunque no se pueda guardar.
+  }
+}
+
 // Solo flechas (sin WASD, según lo acordado). Un Set permite diagonales
 // (dos teclas a la vez) e ignora la auto-repetición del keydown.
 const pressed = new Set();
@@ -65,6 +110,9 @@ function ganar() {
   fondoActual = 'fondo2'; // Por qué directo: el spec descarta fundido; ambos fondos miden 2752×1536 con el mismo encuadre.
   pressed.clear(); // Por qué: al ganar se vacía (modelo de datos) para no arrastrar flechas.
   pantallaVictoria.classList.remove('oculta');
+  // Por qué guardado puntual aquí: en victoria nada se mueve, así que el throttle
+  // (solo activo en jugando) nunca lo persistiría; esto fija estado:'victoria'+fondo2 (criterio 3).
+  escribirGuardado();
 }
 
 // Por qué volverAEmpezar: aplica el reset completo del spec (480,400,'down',fondo1,
@@ -109,6 +157,15 @@ window.addEventListener('keyup', (e) => {
   if (ARROWS.has(e.key)) pressed.delete(e.key);
 });
 window.addEventListener('blur', () => pressed.clear()); // Por qué: si se pierde el foco no queda una tecla "pegada".
+// Por qué solo pagehide (sin beforeunload/visibilitychange): un solo hook cubre
+// el cierre en móvil y escritorio sin duplicar eventos (spec 02, decisiones).
+window.addEventListener('pagehide', () => {
+  try {
+    escribirGuardado();
+  } catch {
+    // Por qué silencio: al cerrar no hay nada que mostrar; escribirGuardado ya filtra por estado.
+  }
+});
 
 // Por qué 8 direcciones: las hojas ya traen las 8 filas y así Charizard
 // mira hacia donde va también en diagonal.
@@ -222,6 +279,14 @@ async function main() {
       ganar();
       player.moving = false; // Por qué: queda quieto en idle bajo el overlay de victoria.
       player.idleT0 = now;
+    }
+
+    // Por qué throttle solo en jugando y tras mover/ganar: en inicio/victoria nada
+    // se mueve (victoria ya se guardó en ganar()); se actualiza lastSaveTime en cada
+    // intento para serializar como máximo 1 vez/s y escribirGuardado descarta si el JSON no cambió.
+    if (estado === 'jugando' && now - lastSaveTime >= SAVE_EVERY_MS) {
+      lastSaveTime = now;
+      escribirGuardado();
     }
 
     // Por qué mapa de imágenes: drawBackground elige el recorte por fondoActual pero necesita la imagen precargada.
